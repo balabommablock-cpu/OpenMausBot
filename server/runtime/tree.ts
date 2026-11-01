@@ -70,6 +70,10 @@ export const isTerminal = (a: Assignment): boolean => terminal(a.status);
 
 export const awaited = (children: readonly Assignment[]): Assignment[] => children.filter(c => c.reply !== "none");
 
+/** Parked on something its requester hears of at once: a question answered in words, or, at Full access, a card too, so
+ * the rest of the work moves on while the person acts on it. Another card park waits on its card. */
+export const asking = (a: Assignment): boolean => a.status === "needs_input" && (!(a.cards && a.cards.length > 0) || a.level === "full");
+
 export function path(store: RuntimeStore, n: Assignment): Assignment[] {
   const out: Assignment[] = [];
   const seen = new Set<string>();

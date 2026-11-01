@@ -2,9 +2,10 @@
 // packaged app ships no node_modules. Entry points keep their exact relative
 // paths under dist-server, where the server locates each proxy by path.
 import { build } from "esbuild";
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { serverLocalePlugin } from "./server-locale-plugin.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const server = join(root, "server");
@@ -18,6 +19,13 @@ const yamlEsmPlugin = {
       path: join(root, "node_modules", "yaml", "browser", "index.js"),
     }));
   },
+};
+
+// ws is CommonJS and requires Node's own modules, which an ESM bundle reaches
+// only through a require of its own (esbuild otherwise throws "Dynamic require
+// of "events" is not supported" when it loads).
+const NODE_REQUIRE = {
+  js: 'import { createRequire as __ombCreateRequire } from "node:module";\nconst require = __ombCreateRequire(import.meta.url);',
 };
 
 // Every file run as its own process.
@@ -49,6 +57,10 @@ const ENTRY_POINTS = [
   "drivers/agents-proxy.ts",
   "drivers/dweb-proxy.ts",
   "drivers/phone-proxy.ts",
+  // the bot box (server/bot-box): the in-box bridge, the probe the self-check runs inside a box, and the check by hand
+  "bot-box/box-bridge.ts",
+  "bot-box/box-probe.ts",
+  "bot-box/box-check.ts",
 ];
 
 await build({
@@ -62,7 +74,8 @@ await build({
   // Written after tsc, replacing its output for these entry points.
   allowOverwrite: true,
   logLevel: "info",
-  plugins: [yamlEsmPlugin],
+  plugins: [yamlEsmPlugin, serverLocalePlugin],
+  banner: NODE_REQUIRE,
 });
 
 // External MCP clients launch this as an independent stdio process, so release
@@ -76,6 +89,7 @@ await build({
   outfile: join(root, "dist-server", "mcp-server.js"),
   allowOverwrite: true,
   logLevel: "info",
+  plugins: [serverLocalePlugin],
 });
 
 // `openmausbot serve --tunnel` spawns the connector guardian as its own
@@ -117,6 +131,7 @@ if (existsSync(join(root, "enterprise", "server", "index.ts"))) {
     outfile: join(root, "dist-server", "enterprise", "server", "index.js"),
     allowOverwrite: true,
     logLevel: "info",
+    plugins: [serverLocalePlugin],
   });
   copyFileSync(join(root, "enterprise", "LICENSE"), join(root, "dist-server", "enterprise", "LICENSE"));
 }
@@ -143,4 +158,11 @@ await build({ entryPoints: [piMcpExtSrc], outfile: piMcpExtDest, bundle: true,
 
 // Desktop resources live outside app.asar, so its package.json cannot mark
 // these .js bundles as ESM. Do not inherit a user's CommonJS package scope.
-writeFileSync(join(root, "dist-server", "package.json"), '{"type":"module"}\n');
+// The version rides along: an image ships dist-server without the root
+// package.json, and the server reports this one (server/environment.ts).
+const { version } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+writeFileSync(join(root, "dist-server", "package.json"), `${JSON.stringify({ type: "module", version })}\n`);
+
+// tsc copies the language packs server/server-lines.ts imports (13 MB) beside its own output. The bundles above carry
+// the server's keys, so nothing reads the copies.
+rmSync(join(root, "dist-server", "src", "locales"), { recursive: true, force: true });

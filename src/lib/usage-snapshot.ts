@@ -17,7 +17,7 @@ export const SNAPSHOT_CHECK_MS = 60 * 60 * 1_000;
 const SOURCE_TIMEOUT_MS = 60_000;
 const DAY_KEY = "omb-analytics-snapshot-day";
 
-export type CloudPlanFacts = { plan: "personal" | "pro" | "max" | "other" | "none" | "unknown"; trial?: boolean };
+export type CloudPlanFacts = { plan: "starter" | "personal" | "pro" | "max" | "other" | "none" | "unknown"; trial?: boolean };
 
 export interface UsageInput {
   config: ConfigStatus;
@@ -53,6 +53,7 @@ function keyProviders(config: ConfigStatus): KeyProvider[] {
     [config.mistral?.configured, "mistral"],
     [config.cerebras?.configured, "cerebras"],
     [config.groq?.configured, "groq"],
+    [config.greenference?.configured, "greenference"],
     [config.meta?.configured, "meta"],
     [config.box?.configured && config.box.included !== true, "boat"],
     [config.composio?.configured && config.composio.mode === "self-hosted", "composio"],
@@ -63,7 +64,8 @@ function keyProviders(config: ConfigStatus): KeyProvider[] {
     [ownDecider && config.decider?.provider === "openrouter", "openrouter_decider"],
     [config.imageGen?.openaiConfigured, "openai_image"],
     [config.imageGen?.customKeyConfigured, "custom_image"],
-    [config.live?.configured, "openai_live"],
+    [config.live?.keySource === "live", "openai_live"],
+    [config.treg?.configured, "treg"],
   ];
   return configured.flatMap(([on, provider]) => on === true ? [provider] : []);
 }

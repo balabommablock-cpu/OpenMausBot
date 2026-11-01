@@ -33,6 +33,8 @@ function routineHeader(name: string, trigger: RoutineRunTrigger): string {
   return `[${trigger === "schedule" ? "Scheduled routine" : "Routine"} ${label} — do this now:]\n`;
 }
 
+export const routinePrompt = (text: string): boolean => /^\[(?:Scheduled routine|Routine) "/u.test(text);
+
 const CONTINUITY_CHARS = 2_000;
 const finishedOrder = (run: RoutineRun) => run.finishedAt ?? run.createdAt;
 
@@ -63,13 +65,13 @@ export function continuityCarry(run: RoutineRun, routines: readonly Pick<Routine
 }
 
 export function composeExecutionPrompt(
-  routine: { name: string; trigger: RoutineRunTrigger; runOn: RoutineRunOn },
+  routine: { id: string; name: string; trigger: RoutineRunTrigger; runOn: RoutineRunOn },
   prompt: string,
   attachments: readonly RoutineContextAttachment[] | undefined,
   carry?: RoutineContinuityCarry | null,
   retried?: RoutineRetryCause,
 ): string {
-  const parts = [`${routineHeader(routine.name, routine.trigger)}${prompt}`, retried ? retryNote(retried) : ""];
+  const parts = [`${routineHeader(routine.name, routine.trigger)}${routine.trigger === "webhook" ? "" : `Trigger id: ${routine.id}\n`}${prompt}`, retried ? retryNote(retried) : ""];
   const foreign = foreignPaths([prompt, ...(attachments ?? []).map((attachment) => attachment.path)], runHostPlatform(routine.runOn));
   if (foreign.length) {
     parts.push(`[OpenMausBot: this run is on a ${hostName(runHostPlatform(routine.runOn))} computer, where ${foreign.join(", ")} cannot exist. If the work needs ${foreign.length > 1 ? "them" : "it"}, say plainly what is missing instead of reporting success.]`);

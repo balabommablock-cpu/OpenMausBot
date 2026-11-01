@@ -115,9 +115,9 @@ async function routineFrom(botId: string, name: string, token?: string) {
   rmSync(dump, { force: true });
   expect((await api("POST", `/api/bots/${botId}/messages`, { token, body: { text: `Every hour: ${name}.`, threadId } })).status).toBe(202);
   await expect.poll(() => existsSync(dump), { timeout: hostTimeout(15_000) }).toBe(true);
-  const applied = await (await agentTools())("propose_routine", { name, instructions: `${name}.`, schedule: { type: "interval", every_minutes: 60 } });
+  const applied = await (await agentTools())("create_trigger", { when: "schedule", name, instructions: `${name}.`, schedule: { type: "interval", every_minutes: 60 } });
   await release(botId, token);
-  const id = /\\"resultId\\":\\"([\w-]+)\\"/.exec(applied)?.[1];
+  const id = /trigger id ([\w-]+)/.exec(applied)?.[1];
   expect(id, applied).toBeTruthy();
   return id!;
 }
@@ -142,7 +142,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
 `, { mode: 0o755 });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     instances: {
-      ...Object.fromEntries(["codex", "cursor", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
+      ...Object.fromEntries(["codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
       claude: { driver: "claudeAgent", displayName: "Claude", config: { cli } },
     },
   }));

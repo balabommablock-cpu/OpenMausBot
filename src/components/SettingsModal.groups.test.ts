@@ -12,8 +12,6 @@ const fixture = vi.hoisted(() => ({
   setShowThreads: vi.fn(),
   showRunCard: true,
   setShowRunCard: vi.fn(),
-  sidebarDensity: "comfortable" as "comfortable" | "compact" | "icons",
-  setSidebarDensity: vi.fn(),
   notificationSounds: true,
   setNotificationSounds: vi.fn(),
   advancedMode: false,
@@ -38,11 +36,6 @@ vi.mock("@/lib/thread-preferences", () => ({
 vi.mock("@/lib/run-card-preferences", () => ({
   useShowRunCard: () => fixture.showRunCard,
   setShowRunCard: fixture.setShowRunCard,
-}));
-vi.mock("@/lib/sidebar-preferences", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/lib/sidebar-preferences")>(),
-  useSidebarDensity: () => fixture.sidebarDensity,
-  setSidebarDensity: fixture.setSidebarDensity,
 }));
 vi.mock("@/lib/notification-preferences", () => ({
   useNotificationSounds: () => fixture.notificationSounds,
@@ -73,7 +66,6 @@ beforeEach(() => {
   fixture.section = "appearance";
   fixture.showThreads = true;
   fixture.showRunCard = true;
-  fixture.sidebarDensity = "comfortable";
   fixture.notificationSounds = true;
   // these pin the Advanced rail; Simple has its own suite (SettingsModal.simple.test.ts)
   fixture.advancedMode = true;
@@ -104,24 +96,24 @@ function rail(html: string): Record<string, string[]> {
 }
 
 describe("Settings rail groups", () => {
-  it("files every page under You, AI, Computers or Account, in that order", () => {
+  it("files every page under You, AI, Devices or Account, in that order", () => {
     expect(SETTINGS_GROUPS.map((group) => group.id)).toEqual(["you", "ai", "computers", "account"]);
     const ids = SECTIONS.map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toHaveLength(18); // 16 + the shared Skills library (AI group) + Logins (Computers)
+    expect(ids).toHaveLength(19); // 16 + the shared Skills library (AI group) + Logins (Devices) + Import (Account)
     for (const entry of SECTIONS) expect(SETTINGS_GROUPS.map((group) => group.id)).toContain(entry.group);
   });
 
   it("shows every desktop page under its labelled group", () => {
     vi.stubGlobal("window", { ogb: { environments: {}, organization: {}, cloudAccount: {} } });
     const html = render();
-    for (const label of ["You", "AI", "Computers", "Account"]) expect(html).toContain(`>${label}</div>`);
+    for (const label of ["You", "AI", "Devices", "Account"]) expect(html).toContain(`>${label}</div>`);
     expect(html).toContain("glass-surface");
     expect(rail(html)).toEqual({
       you: ["general", "appearance", "companion"],
       ai: ["engines", "connections", "decisionModel"],
       computers: ["desktopWorkspaces", "computer", "logins"],
-      account: ["cloudAccount", "organization", "usage", "backups", "experimental"],
+      account: ["cloudAccount", "organization", "usage", "backups", "import", "experimental"],
     });
     expect(html).toContain('<optgroup label="AI">');
   });

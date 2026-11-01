@@ -24,8 +24,10 @@ import { VisibilitySection } from "./bot-settings/VisibilitySection";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { BotPanel } from "./bot-panel/PanelShell";
+import { BOT_PANEL_ID, sidePanelCls } from "./bot-panel/side-panel";
 import { HistoryRollbackDialog, useBotHistory, useBotOverview } from "./bot-settings/useBotOverview";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
+import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
 
 const sectionLabel = (entry: (typeof BOT_SECTIONS)[number]) => (entry.labelKey ? t(entry.labelKey) : entry.label);
 
@@ -42,7 +44,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
   const section = state.botSettingsSection;
   const derived = useBotSettingsDerived(bot);
   const dialogRef = useRef<HTMLElement | null>(null);
-  const { padClass, dragProps } = useCaptionChrome();
+  const { dragProps } = useCaptionChrome();
   const [query, setQuery] = useState("");
   const collapsed = !state.botSettingsExpandAccordion;
   const q = query.trim().toLowerCase();
@@ -51,9 +53,10 @@ export function BotSettingsDialog({ bot, overlay = false }: {
   const linkedSection = !collapsed && !state.botSettingsExpandRemembered ? section : null;
   const slackUrl = useSlackManagementUrl(bot.id);
   const ownerOrAdmin = useOwnerOrAdmin();
+  const teamName = useTeamName();
   const sections = BOT_SECTIONS
     .filter((entry) => entry.id !== "slack" || slackUrl !== null)
-    .filter((entry) => entry.id !== "visibility" || (!window.ogb && ownerOrAdmin === true));
+    .filter((entry) => entry.id !== "visibility" || (!window.ogb && ownerOrAdmin === true && !teamName));
   const visibleSections = sections.filter((entry) => sectionMatches(entry, q));
 
   const { overview, overviewError, prompt, promptError } = useBotOverview(bot, {
@@ -163,38 +166,35 @@ export function BotSettingsDialog({ bot, overlay = false }: {
     <>
       <aside
         ref={dialogRef}
+        id={simpleView ? BOT_PANEL_ID : undefined}
         role="dialog"
         aria-labelledby="bot-settings-title"
         tabIndex={-1}
-        className={cn(
-          "animate-panel-in absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel outline-none focus-visible:outline-none",
-          overlay
-            ? "md:inset-auto md:right-0 md:top-0 md:bottom-0 md:w-[min(420px,42vw)] md:shadow-2xl"
-            : "md:static md:z-auto md:w-[min(420px,42vw)] md:shrink-0",
-        )}
+        className={sidePanelCls(overlay, simpleView)}
       >
         {simpleView ? (
           <BotPanel
             bot={bot}
             derived={derived}
-            headerClassName={padClass}
-            slackUrl={slackUrl}
             linkedSection={linkedSection}
             onClose={() => dispatch({ type: "toggleSettings", open: false })}
           />
         ) : <>
-        <div {...dragProps} className={cn("flex shrink-0 items-center justify-between px-4 py-3", padClass)}>
+        <div {...dragProps} className="flex shrink-0 items-center justify-between px-4 py-3">
           <span id="bot-settings-title" className="truncate text-[15px] font-semibold text-ink">
             {bot.name}
           </span>
-          <button
-            type="button"
-            onClick={() => dispatch({ type: "toggleSettings", open: false })}
-            aria-label="Close settings"
-            className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
-          >
-            <X size={18} className="pointer-events-none" />
-          </button>
+          <span className="flex shrink-0 items-center gap-1">
+            <ShareBotButton bot={bot} className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink" />
+            <button
+              type="button"
+              onClick={() => dispatch({ type: "toggleSettings", open: false })}
+              aria-label="Close settings"
+              className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
+            >
+              <X size={18} className="pointer-events-none" />
+            </button>
+          </span>
         </div>
 
         <div className="mx-4 mb-2 flex shrink-0 items-center gap-2 rounded-lg border border-transparent bg-control/70 px-2.5 py-2 focus-within:border-focus">
@@ -211,16 +211,16 @@ export function BotSettingsDialog({ bot, overlay = false }: {
               if (query) setQuery("");
               else dispatch({ type: "toggleSettings", open: false });
             }}
-            placeholder="Search"
-            aria-label="Search settings"
+            placeholder={t("botSettings.search")}
+            aria-label={t("botSettings.searchAria")}
             className="w-full bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
           />
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {visibleSections.length === 0 && (
-            <div className="px-4 py-4 text-[12.5px] leading-relaxed text-ink-secondary">
-              Nothing matches “{query.trim()}”
+            <div className="px-4 py-4 text-[13px] leading-relaxed text-ink-secondary">
+              {t("botSettings.searchNone", { query: query.trim() })}
             </div>
           )}
           {sections.map((entry) => {

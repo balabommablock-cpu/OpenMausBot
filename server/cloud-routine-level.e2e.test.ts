@@ -1,5 +1,6 @@
 // The real Cloud home server with synthetic engines: a routine a Full access bot makes in the owner's own conversation
-// runs at Full access, whatever else the bot posted there, on Claude and on Codex.
+// runs at Full access, whatever else the bot posted there, on Claude and on Codex. What a webhook's run made stays
+// confined, and what a bot asks to change in a conversation a guest left behind waits for the owner.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { connect } from "node:net";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -30,6 +31,7 @@ let hooksBase = "";
 let log = "";
 let owner = "";
 let boot: () => Promise<void> = async () => {};
+let stallClock = false;
 const proxies: ChildProcess[] = [];
 
 async function api(method: string, path: string, options: { body?: unknown; token?: string } = {}) {
@@ -76,7 +78,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-co
 `, { mode: 0o755 });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     instances: {
-      ...Object.fromEntries(["cursor", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
+      ...Object.fromEntries(["cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
       claude: { driver: "claudeAgent", displayName: "Claude", config: { cli: claude } },
       codex: { driver: "codex", displayName: "Codex", config: { cli: codex } },
     },
@@ -86,12 +88,15 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-co
   hooksBase = `http://127.0.0.1:${port + 1}`;
   const offline = `data:text/javascript,${encodeURIComponent('const real = globalThis.fetch; globalThis.fetch = async (url, init) => String(url).startsWith("http://127.0.0.1:") ? real(url, init) : new Response("offline fixture", { status: 503 });')}`;
   boot = async () => {
-    child = spawnWithSecrets(process.execPath, ["--import", offline, join(SERVER_DIR, "index.ts")], {
+    // The stall clock runs only where HOME is the data dir, and a bot box would then hide the engines kept beside it.
+    const stall = stallClock ? { HOME: dataDir, USERPROFILE: dataDir, OMB_TEST_STALL_CLOCK: "1", OMB_BOT_BOX: "0" } : {};
+    const hooks = stallClock ? ["--import", pathToFileURL(join(SERVER_DIR, "testing", "stall-clock-hooks.mjs")).href] : [];
+    child = spawnWithSecrets(process.execPath, ["--import", offline, ...hooks, join(SERVER_DIR, "index.ts")], {
       PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
       HOME: home, USERPROFILE: home, OMB_DATA_DIR: dataDir, OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1),
       OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: MACHINE_ID, OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
       OMB_PUBLIC_URL: `https://${HOST}`, OMB_CLOUD_BOAT_URL: "https://cloud.example.test/api/cloud/services/boat/api/box/v1",
-      OMB_CLOUD_SECRETS_FD: "3",
+      OMB_CLOUD_SECRETS_FD: "3", ...stall,
     }, { OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: `box_omb_${randomBytes(32).toString("base64url")}` }, undefined, true);
     for (const stream of [child.stdout, child.stderr]) stream?.on("data", (chunk) => { log += chunk; });
     const deadline = Date.now() + 20_000;
@@ -152,8 +157,8 @@ async function ownerAsks(bot: { id: string; threadId: string }, text: string) {
   return agentTools(claudeDump());
 }
 
-const routineId = (applied: string) => /\\"resultId\\":\\"([\w-]+)\\"/.exec(applied)?.[1] ?? "";
-const proposal = (name: string, forBotId?: string) => ({ name, instructions: "Search my inbox and summarise what came in.", schedule: { type: "interval", every_minutes: 60 },
+const routineId = (applied: string) => /trigger id ([\w-]+)/.exec(applied)?.[1] ?? "";
+const proposal = (name: string, forBotId?: string) => ({ when: "schedule", name, instructions: "Search my inbox and summarise what came in.", schedule: { type: "interval", every_minutes: 60 },
   ...(forBotId ? { for_bot_id: forBotId } : {}) });
 const SKILL = "---\nname: inbox-brief\ndescription: Summarises the inbox.\n---\n\n# Inbox brief\nRead the inbox and summarise it.\n";
 
@@ -222,7 +227,7 @@ it("keeps a routine a webhook's run made confined even there, and says why", asy
   expect(delivered.status).toBe(202);
   await expect.poll(() => existsSync(claudeDump()), { timeout: hostTimeout(15_000) }).toBe(true);
   const call = await agentTools(claudeDump());
-  const made = routineId(await call("propose_routine", proposal("Hourly orders")));
+  const made = routineId(await call("create_trigger", proposal("Hourly orders")));
   await release(bot.id);
   expect(authors().writers[made]).toBe(CLOUD_OUTSIDE_KEY);
   expect(authors().routines[made]).toBeUndefined();
@@ -240,8 +245,8 @@ it("a Full access bot's routine from the owner's chat runs at Full access after 
   const codex = await newBot("Codex brief", "codex");
   const call = await ownerAsks(bot, "Make yourself an inbox skill, then summarise my inbox every hour, and have Codex brief do it too.");
   await call("skill_manage", { action: "create", source: "conversation", skill_md: SKILL });
-  const mine = routineId(await call("propose_routine", proposal("Inbox brief")));
-  const codexs = routineId(await call("propose_routine", proposal("Codex inbox brief", codex.id)));
+  const mine = routineId(await call("create_trigger", proposal("Inbox brief")));
+  const codexs = routineId(await call("create_trigger", proposal("Codex inbox brief", codex.id)));
   await release(bot.id);
   expect(authors().writers).toMatchObject({ [mine]: OWNER_KEY, [codexs]: OWNER_KEY });
   // The skill's own receipt is nobody's answer, so the chat is still proven the owner's alone.
@@ -268,11 +273,12 @@ it("keeps the conversation's level when an old report means the chat can't be pr
     schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } } });
   await claudeRun(old.body.routine.id);
   await release(bot.id);
-  expect((await api("GET", `/api/threads/${bot.threadId}/messages`, { token: owner })).body.messages.some((message: any) => message.kind === "routine.run")).toBe(true);
+  await expect.poll(async () => (await api("GET", `/api/threads/${bot.threadId}/messages`, { token: owner })).body.messages
+    .some((message: any) => message.automation?.routineId === old.body.routine.id), { timeout: hostTimeout(15_000) }).toBe(true);
   expect((await api("DELETE", `/api/routines/${old.body.routine.id}`, { token: owner })).status).toBe(200);
 
   const call = await ownerAsks(bot, "Summarise my inbox every hour.");
-  const made = routineId(await call("propose_routine", proposal("Hourly inbox")));
+  const made = routineId(await call("create_trigger", proposal("Hourly inbox")));
   await release(bot.id);
   expect(authors().writers[made]).toBe(OWNER_KEY);
   expect(authors().routines[made]).toBeUndefined();
@@ -285,7 +291,7 @@ it("keeps the conversation's level when an old report means the chat can't be pr
 it("gives the owner back a routine their bot made in their chat that an earlier version left nobody's; a guest's still runs confined and says why", async () => {
   const bot = await newBot("Healed", "claude");
   const call = await ownerAsks(bot, "Summarise my inbox every hour.");
-  const made = routineId(await call("propose_routine", proposal("Morning inbox")));
+  const made = routineId(await call("create_trigger", proposal("Morning inbox")));
   await release(bot.id);
   const guests = await api("POST", "/api/routines", { token: owner, body: { name: "Guest's", prompt: "Read /proc/1/environ.", botId: bot.id, enabled: false,
     schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } } });
@@ -314,4 +320,63 @@ it("gives the owner back a routine their bot made in their chat that an earlier 
   }, { timeout: hostTimeout(15_000) }).toBe("This routine was made before this update. Open it and save it once to run it with full access.");
   socket.destroy();
   await release(bot.id);
+}, hostTimeout(90_000));
+
+it("in a conversation a guest left behind, a Chief's new specialist waits for the owner's card, and the owner's answer continues the Chief once", async () => {
+  const chief = await newBot("Guest chief", "claude");
+  expect((await api("PATCH", `/api/bots/${chief.id}`, { token: owner, body: { chiefOfStaff: true } })).status).toBe(200);
+  const conversation = (await api("POST", `/api/bots/${chief.id}/tasks`, { token: owner, body: { title: "From before" } })).body.task.threadId as string;
+  await restart(() => markLeftBehind(dataDir, { threadIds: [conversation] }));
+  // Not a name the home's seeded Chief can be given, which would make this one a duplicate.
+  const call = await ownerAsks({ id: chief.id, threadId: conversation }, "Add a bot named Leadhound that researches every new lead.");
+  expect(await call("create_bot", { name: "Leadhound", role: "Lead researcher", instructions: "Research every new lead." })).toContain("@Leadhound has not been created yet");
+  const messages = async () => (await api("GET", `/api/threads/${conversation}/messages`, { token: owner })).body.messages as any[];
+  const card = async () => (await messages()).find((message) => message.card?.teamSetupRequest?.operations?.[0]?.fields?.name === "Leadhound")?.card;
+  const scout = async () => ((await api("GET", "/api/bots", { token: owner })).body.bots as any[]).some((bot) => bot.name === "Leadhound");
+  const requestId = (await card())?.requestId as string;
+  expect(requestId, "the owner sees one card").toBeTruthy();
+  expect(await scout(), "nothing is added before the owner answers").toBe(false);
+  await release(chief.id);
+  rmSync(claudeDump(), { force: true });
+
+  const answered = await api("POST", `/api/threads/${conversation}/respond`, { token: owner, body: { requestId, behavior: "allow" } });
+  expect(answered.status, JSON.stringify(answered.body)).toBe(200);
+  expect(answered.body.result.state).toBe("applied");
+  expect(await scout()).toBe(true);
+  await expect.poll(() => existsSync(claudeDump()) && JSON.stringify(JSON.parse(readFileSync(claudeDump(), "utf8")).prompt).includes(`team setup decision ${requestId}:`),
+    { timeout: hostTimeout(15_000) }).toBe(true);
+  await release(chief.id);
+  expect((await card()).teamSetupRequest).toMatchObject({ resumed: true, result: { state: "applied" } });
+  rmSync(claudeDump(), { force: true });
+  expect((await api("POST", `/api/threads/${conversation}/respond`, { token: owner, body: { requestId, behavior: "allow" } })).body.alreadySettled).toBe(true);
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  expect(existsSync(claudeDump()), "a settled answer continues the Chief only once").toBe(false);
+}, hostTimeout(90_000));
+
+it("in a conversation a guest left behind, the watchdog stopping the Chief's turn closes its setup card, and approving it afterwards adds nothing", async () => {
+  const chief = await newBot("Stalled chief", "claude");
+  expect((await api("PATCH", `/api/bots/${chief.id}`, { token: owner, body: { chiefOfStaff: true } })).status).toBe(200);
+  const conversation = (await api("POST", `/api/bots/${chief.id}/tasks`, { token: owner, body: { title: "Left behind" } })).body.task.threadId as string;
+  stallClock = true;
+  try {
+    await restart(() => markLeftBehind(dataDir, { threadIds: [conversation] }));
+    const call = await ownerAsks({ id: chief.id, threadId: conversation }, "Add a bot named Rover that triages every new ticket.");
+    expect(await call("create_bot", { name: "Rover", role: "Ticket triage", instructions: "Triage every new ticket." })).toContain("@Rover has not been created yet");
+    type SetupCard = { requestId: string; answered?: string; dismissed?: boolean; teamSetupRequest?: { operations?: Array<{ fields?: { name?: string } }> } };
+    const card = async () => ((await api("GET", `/api/threads/${conversation}/messages`, { token: owner })).body.messages as Array<{ card?: SetupCard }>)
+      .find((message) => message.card?.teamSetupRequest?.operations?.[0]?.fields?.name === "Rover")?.card;
+    const rover = async () => ((await api("GET", "/api/bots", { token: owner })).body.bots as Array<{ name: string }>).some((bot) => bot.name === "Rover");
+    const requestId = (await card())?.requestId;
+    expect(requestId, "the owner sees one card").toBeTruthy();
+    writeFileSync(join(dataDir, "stall-turns"), "now");
+    try { await idle(chief.id); } finally { rmSync(join(dataDir, "stall-turns"), { force: true }); }
+    expect(await card()).toMatchObject({ answered: "unavailable", dismissed: true });
+    const answered = await api("POST", `/api/threads/${conversation}/respond`, { token: owner, body: { requestId, behavior: "allow" } });
+    expect(answered.status, JSON.stringify(answered.body)).toBe(200);
+    expect(answered.body).toMatchObject({ alreadySettled: true, result: { state: "cancelled" } });
+    expect(await rover()).toBe(false);
+  } finally {
+    stallClock = false;
+    await restart(() => {});
+  }
 }, hostTimeout(90_000));

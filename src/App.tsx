@@ -69,6 +69,7 @@ import { useChiefStepOpen } from "@/lib/default-bot";
 import { SESSION_ENDED_REASON, useSessionEnded } from "@/lib/session-ended";
 import { PairPage } from "./pair/PairPage";
 import { WebPanelPage } from "@/components/WebPanelPage";
+import { shortcutBotOrder, sidebarBotRowIds } from "@/components/sidebar-shortcut-order";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
@@ -176,7 +177,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
 
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
-      const bots = state.bots.filter((b) => !b.hidden);
+      const bots = shortcutBotOrder(state.bots, sidebarBotRowIds());
       if (e.key === "n" && !e.shiftKey) {
         e.preventDefault();
         dispatch({ type: "newBot" });
